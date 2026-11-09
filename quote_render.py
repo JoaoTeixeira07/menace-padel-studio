@@ -28,7 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 W, H = 1080, 1350
 
 # --- design constants (from QUOTE.psd) ---
-LOGO_XY = (50, 50)                     # thrill_logo.png, 285x68
+LOGO_XY = (50, 50)                     # thrill_logo.png, scaled to 285 px wide
+LOGO_W = 285
 ICON_SIZE = (162, 56)                  # quote_icon.png
 ICON_GAP = 24                          # icon bottom -> quote cap top
 Q_FONT = "AgencyFB-BoldCondensed.otf"
@@ -375,6 +376,8 @@ def render(data, out_path, photo=None):
     icon = Image.open(asset("quote_icon.png")).convert("RGBA")
     canvas.alpha_composite(icon, (round(W / 2 - ICON_SIZE[0] / 2), icon_top))
     logo = Image.open(asset("thrill_logo.png")).convert("RGBA")
+    if logo.width != LOGO_W:  # any resolution works: scaled to the template width
+        logo = logo.resize((LOGO_W, round(logo.height * LOGO_W / logo.width)), Image.LANCZOS)
     canvas.alpha_composite(logo, LOGO_XY)
 
     canvas.convert("RGB").save(out_path, quality=95)

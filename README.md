@@ -1,1 +1,0 @@
-# menace-padel-studio

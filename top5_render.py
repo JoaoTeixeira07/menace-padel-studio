@@ -13,7 +13,7 @@ data.json:
     {"rank": 2, "name": "Tapia/Coello", "flags": ["ar", "es"], "value": "10.440"},   # pairs: 2 flags
     ...
   ],
-  "highlight": [1],          # rows (1 = first row) with the accent outline, accent number box and blue value
+  "highlight": [1],          # rows (1 = first row) highlighted; or {"1": "gold", "3": "electric"} for one colour per row
   "blue": [5],               # optional: rows with only the blue value box
   "accent": "gold",          # gold (default) or electric
   "bg_focus_y": 0.3, "bg_focus_x": 0.5, "bg_zoom": 1.0, "bw": false
@@ -248,8 +248,15 @@ def render(data, out_path, photo=None):
         raise SystemExit("A background photo is required: top5_render.py data.json out.png photo.jpg")
     rows = data["rows"]
     n = len(rows)
-    acc = ACCENTS.get(data.get("accent", "gold"), ACCENTS["gold"])
-    hl = set(data.get("highlight", []))
+    default_acc = data.get("accent", "gold")
+    # "highlight": [1, 3] (all in the post accent) or {"1": "gold", "3": "electric"} (one colour per row);
+    # a row can also carry its own "accent"
+    raw = data.get("highlight", [])
+    hl_acc = {int(k): v for k, v in raw.items()} if isinstance(raw, dict) else {int(k): default_acc for k in raw}
+    for i_, r_ in enumerate(rows):
+        if r_.get("accent"):
+            hl_acc[i_ + 1] = r_["accent"]
+    hl = set(hl_acc)
     blue = set(data.get("blue", [])) | hl
 
     # photo
@@ -320,6 +327,7 @@ def render(data, out_path, photo=None):
         idx = i + 1
         y = tops[i]
         is_hl = idx in hl
+        acc = ACCENTS.get(hl_acc.get(idx, default_acc), ACCENTS["gold"])
         # body (texture on every other row: 1st, 3rd, 5th...)
         bw_, bh_ = X1 - X0, row_h
         m = rmask(bw_, bh_, (5, 5, 5, 5))

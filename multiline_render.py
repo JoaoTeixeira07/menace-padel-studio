@@ -165,14 +165,15 @@ def main_people(mask):
     return xs.min(), ys.min(), xs.max(), ys.max()
 
 
-def place_photo(photo, data, need_cutout):
+def place_photo(photo, data, need_cutout, autoframe=None):
     im = Image.open(photo)
     im = ImageOps.exif_transpose(im).convert("RGB")
     if data.get("bw"):
         im = ImageOps.grayscale(im).convert("RGB")
     fx, fy, zoom = data.get("bg_focus_x"), data.get("bg_focus_y"), data.get("bg_zoom")
     own_cut = data.get("cutout")
-    auto = need_cutout and not own_cut and (fx is None or fy is None or zoom is None)
+    autoframe = need_cutout if autoframe is None else autoframe
+    auto = autoframe and need_cutout and not own_cut and (fx is None or fy is None or zoom is None)
     head = cx = None
     if auto:
         base = cover_scale(im, 1.0)
@@ -365,6 +366,138 @@ def lines_layer(lines, layout, has_marks, sub_cap_top):
     return out, [" ".join(w for w, _ in l) for l in lines]
 
 
+# ---------- circle inset ----------
+CIRCLE_D = 430                 # default diameter (circle.psd: 429 px)
+CIRCLE_STROKE = 6              # white stroke, inside (circle.psd)
+CIRCLE_POS = {                 # centre points for the usual spots; the user can also give "x,y"
+    "top-left": (234, 424), "top-right": (846, 424), "top-center": (540, 430),
+    "left": (234, 620), "right": (846, 620), "center": (540, 620),
+}
+X_RED = (237, 28, 36)
+
+
+def _put(layer, img, xy):
+    """alpha_composite that accepts positions partly outside the canvas."""
+    x, y = xy
+    l, t = max(0, -x), max(0, -y)
+    if l >= img.width or t >= img.height:
+        return
+    img = img.crop((l, t, img.width, img.height))
+    layer.alpha_composite(img, (x + l, y + t))
+
+
+def circle_center(pos, d):
+    if isinstance(pos, (list, tuple)) and len(pos) == 2:
+        return int(pos[0]), int(pos[1])
+    pos = (pos or "top-left").lower().replace(" ", "-").replace("_", "-")
+    if "," in pos:
+        x, y = pos.split(",")[:2]
+        return int(float(x)), int(float(y))
+    return CIRCLE_POS.get(pos, CIRCLE_POS["top-left"])
+
+
+def head_point(mask):
+    """(x, y_top) of the head of the largest person in a mask."""
+    from scipy import ndimage
+    a = np.array(mask) > 128
+    lab, n = ndimage.label(a)
+    if n == 0:
+        return None
+    sizes = ndimage.sum(a, lab, range(1, n + 1))
+    big = lab == (int(np.argmax(sizes)) + 1)
+    ys, xs = np.where(big)
+    top, hgt = ys.min(), ys.max() - ys.min()
+    sel = ys <= top + max(10, 0.18 * hgt)
+    return float(np.median(xs[sel])), int(top)
+
+
+def auto_position(d, person_alpha, avoid=None):
+    """Pick the usual spot where the main player covers the least of the circle."""
+    a = np.array(person_alpha, np.float32) / 255 if person_alpha is not None else None
+    best = None
+    for name in ("top-left", "top-right", "left", "right"):
+        cx, cy = CIRCLE_POS[name]
+        yy, xx = np.ogrid[:H, :W]
+        disc = (xx - cx) ** 2 + (yy - cy) ** 2 <= (d / 2) ** 2
+        cover = float(a[disc].mean()) if a is not None else 0.0
+        if avoid is not None:
+            cover += 0.5 * float(np.array(avoid, np.float32)[disc].mean() / 255)
+        if best is None or cover < best[0] - 0.02:
+            best = (cover, name)
+    return best[1]
+
+
+def circle_layers(spec, bw, person_alpha=None, avoid=None):
+    """Returns (circle RGBA layer, red-X RGBA layer or None, position used) for the inset photo."""
+    d = int(spec.get("size", CIRCLE_D))
+    pos = spec.get("pos")
+    if not pos or str(pos).lower() == "auto":
+        pos = auto_position(d, person_alpha, avoid)
+    cx, cy = circle_center(pos, d)
+    im = ImageOps.exif_transpose(Image.open(spec["photo"])).convert("RGB")
+    if bw:
+        im = ImageOps.grayscale(im).convert("RGB")
+    zoom = spec.get("zoom", 1.0)
+    s = max(d / im.width, d / im.height) * zoom
+    big = im.resize((max(d, round(im.width * s)), max(d, round(im.height * s))), Image.LANCZOS)
+    fx, fy = spec.get("focus_x"), spec.get("focus_y")
+    if fx is None or fy is None:
+        try:  # centre on the head of the main person in the inset photo
+            hc = head_point(person_mask(big))
+        except Exception:
+            hc = None
+        if hc:
+            hx, t = hc
+            if fx is None and big.width > d:
+                fx = float(np.clip(hx - d / 2, 0, big.width - d)) / (big.width - d)
+            if fy is None and big.height > d:
+                fy = float(np.clip(t - 0.08 * d, 0, big.height - d)) / (big.height - d)
+    fx = 0.5 if fx is None else fx
+    fy = 0.3 if fy is None else fy
+    x0, y0 = round((big.width - d) * fx), round((big.height - d) * fy)
+    disc = big.crop((x0, y0, x0 + d, y0 + d)).convert("RGBA")
+    ss = 4  # supersampled circle edge
+    m = Image.new("L", (d * ss, d * ss), 0)
+    ImageDraw.Draw(m).ellipse((0, 0, d * ss - 1, d * ss - 1), fill=255)
+    m = m.resize((d, d), Image.LANCZOS)
+    disc.putalpha(m)
+    ring = Image.new("L", (d * ss, d * ss), 0)
+    ImageDraw.Draw(ring).ellipse((0, 0, d * ss - 1, d * ss - 1), outline=255, width=CIRCLE_STROKE * ss)
+    ring = ring.resize((d, d), Image.LANCZOS)
+    white = Image.new("RGBA", (d, d), (255, 255, 255, 0)); white.putalpha(ring)
+    disc.alpha_composite(white)
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    _put(layer, disc, (cx - d // 2, cy - d // 2))
+    if spec.get("pop"):
+        # the inset person's head breaks out over the top of the frame (circle.psd "Layer 2 copy")
+        try:
+            top = max(0, y0 - int(0.12 * d))
+            pm = person_mask(big)
+            band = Image.new("L", big.size, 0)
+            ImageDraw.Draw(band).rectangle((x0, top, x0 + d, y0 + d // 2), fill=255)
+            pop = big.convert("RGBA"); pop.putalpha(ImageChops.multiply(pm, band))
+            pop = pop.crop((x0, top, x0 + d, y0 + d // 2))
+            _put(layer, pop, (cx - d // 2, cy - d // 2 - (y0 - top)))
+        except Exception:
+            pass
+    xl = None
+    if spec.get("x"):
+        xs = int(d * 0.27); wdt = max(8, int(d * 0.05))
+        xm = Image.new("L", (xs * 4, xs * 4), 0)
+        dr = ImageDraw.Draw(xm); pad = wdt * 2
+        dr.line((pad, pad, xs * 4 - pad, xs * 4 - pad), fill=255, width=wdt * 4)
+        dr.line((pad, xs * 4 - pad, xs * 4 - pad, pad), fill=255, width=wdt * 4)
+        xm = xm.resize((xs, xs), Image.LANCZOS)
+        xi = Image.new("RGBA", (xs, xs), X_RED + (0,)); xi.putalpha(xm)
+        sh = Image.new("RGBA", (xs + 40, xs + 40), (0, 0, 0, 0))
+        sa = Image.new("L", (xs + 40, xs + 40), 0); sa.paste(xm, (20, 24))
+        sh.putalpha(sa.filter(ImageFilter.GaussianBlur(6)).point(lambda v: int(v * 0.45)))
+        xl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        _put(xl, sh, (cx - xs // 2 - 20, cy - d // 2 - int(xs * 0.55) - 20))
+        _put(xl, xi, (cx - xs // 2, cy - d // 2 - int(xs * 0.55)))
+    return layer, xl, pos
+
+
 # ---------- subtitle ----------
 def line_w(f, s, track=-0.02):
     return f.getlength(s) + track * f.size * (len(s) - 1)
@@ -424,9 +557,21 @@ def render(data, out_path, photo=None):
     sub = (data.get("subtitle") or "").strip()
     words, has_marks = parse_text(data["text"])
     lines = split_lines(words, data.get("lines"))
-    bg, _, framing = place_photo(photo, data, need_cutout=False)
+    circ = data.get("circle")
+    cpos = None
+    bg, cut, framing = place_photo(photo, data, need_cutout=bool(circ), autoframe=False)
     canvas = bg
-    canvas.alpha_composite(fade_layer("top") if layout == "top" else ml_fade())
+    if layout == "top":
+        canvas.alpha_composite(fade_layer("top"))
+    if circ:
+        # photo -> circle -> player (in front of the circle) -> gradient -> text   (circle.psd)
+        cl, xl, cpos = circle_layers(circ, data.get("bw"), cut.getchannel("A"))
+        canvas.alpha_composite(cl)
+        canvas.alpha_composite(cut)
+        if xl is not None:
+            canvas.alpha_composite(xl)
+    if layout != "top":
+        canvas.alpha_composite(ml_fade())
     sl, slines, sub_top = subtitle_layer(sub) if sub else (None, [], None)
     tl, out_lines = lines_layer(lines, layout, has_marks, sub_top)
     if layout == "top" and sub:
@@ -436,7 +581,7 @@ def render(data, out_path, photo=None):
         canvas.alpha_composite(sl)
     canvas.alpha_composite(logo_img(), LOGO_BOTTOM_RIGHT if layout == "top" else LOGO_TOP_LEFT)
     canvas.convert("RGB").save(out_path, quality=95)
-    return {"lines": out_lines, "position": layout, "subtitle_lines": slines, "bw": bool(data.get("bw")), "framing": framing}
+    return {"lines": out_lines, "position": layout, "subtitle_lines": slines, "bw": bool(data.get("bw")), "framing": framing, "circle": cpos}
 
 
 def ml_fade():

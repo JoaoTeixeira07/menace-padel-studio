@@ -365,8 +365,8 @@ CARD_BOTTOM = 1240             # fixed bottom edge; the card grows upwards
 CARD_FILL = (250, 250, 250)
 INNER_SHADOW = dict(opacity=0.25, size=35)
 AVATAR = dict(x=129, dy=23, d=72, ring=3)          # dy = offset from the card top
-NAME = dict(x=215, dy=54, size=29, weight="SemiBold", color=(15, 15, 15))
-HANDLE = dict(x=215, dy=83, size=20, weight="Regular", color=(77, 77, 77))
+NAME = dict(x=215, dy=53, size=30, weight="Bold", color=(15, 20, 25), opsz=32)
+HANDLE = dict(x=215, dy=86, size=24, weight="Regular", color=(83, 100, 113), opsz=24)
 BADGE = dict(gap=6, dy=29, d=27)
 XCOM = dict(x=831, dy=37, w=115)
 DIVIDER = dict(x0=101, x1=978, dy=111, h=2, color=(229, 229, 229))
@@ -379,11 +379,17 @@ TW_FADE = [0] * 65 + [1, 4, 7, 10, 13, 17, 22, 27, 32, 38, 45, 51, 58, 66, 73, 8
 _IF = {}
 
 
-def inter(weight, size):
-    key = (weight, size)
+WGHT = {"Regular": 400, "Medium": 500, "SemiBold": 600, "Bold": 700}
+
+
+def inter(weight, size, opsz=None):
+    key = (weight, size, opsz)
     if key not in _IF:
         f = ImageFont.truetype(asset(INTER), size)
-        f.set_variation_by_name(weight)
+        if opsz is None:
+            f.set_variation_by_name(weight)
+        else:
+            f.set_variation_by_axes([opsz, WGHT[weight]])
         _IF[key] = f
     return _IF[key]
 
@@ -566,13 +572,13 @@ def card_layer(data):
     # header
     if data.get("avatar"):
         layer.alpha_composite(avatar_img(data["avatar"], AVATAR["d"], AVATAR["ring"]), (AVATAR["x"], top + AVATAR["dy"]))
-    fn = inter(NAME["weight"], NAME["size"])
+    fn = inter(NAME["weight"], NAME["size"], NAME.get("opsz"))
     name_runs = [(k, s, False) for k, s in tokens(data.get("name", ""))]
     x_end = draw_runs(layer, (NAME["x"], top + NAME["dy"]), name_runs, fn, fn, NAME["size"], NAME["color"])
     if data.get("verified"):
         b = Image.open(asset("tweet_verified.png")).convert("RGBA").resize((BADGE["d"], BADGE["d"]), Image.LANCZOS)
         layer.alpha_composite(b, (round(x_end + BADGE["gap"]), top + BADGE["dy"]))
-    fh = inter(HANDLE["weight"], HANDLE["size"])
+    fh = inter(HANDLE["weight"], HANDLE["size"], HANDLE.get("opsz"))
     handle = data.get("handle", "")
     if handle and not handle.startswith("@"):
         handle = "@" + handle

@@ -79,6 +79,8 @@ THEMES.update({
                      lose_txt=(200, 210, 230), set_lost=(110, 124, 160), seed=(160, 172, 205), glass=True, grain=True),
 })
 DEFAULT_THEME = "electric_bright"
+TEX_FROM = 1150                 # texture starts just under the cards (footer area)
+TEX_STRENGTH = 0.5
 LIME = (190, 240, 40)
 LIME_D = (150, 196, 30)
 # accent colour: winner outline + bar, winning set scores, round label, divider
@@ -277,6 +279,19 @@ def render(data, out_path, photo=None):
     glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(glow).ellipse(glow_box, fill=T["glow"] + (T["glow_a"],))
     base.alpha_composite(glow.filter(ImageFilter.GaussianBlur(120)))
+    tex_mode = data.get("texture", "screen")
+    if tex_mode and tex_mode != "none":
+        # electric-blue brush texture + court-line details at the bottom (the tennis layers, recoloured), lightening the blue
+        import numpy as np
+        tex = Image.open(asset(data.get("texture_file", "score_texture_padel.png"))).convert("RGBA")
+        b = np.array(base, np.float32) / 255; t = np.array(tex, np.float32) / 255
+        k = data.get("texture_strength", TEX_STRENGTH)
+        a = t[..., 3:4] * np.clip((np.arange(H)[:, None, None] - TEX_FROM) / 70, 0, 1)   # only below the cards: they stay as clean as before
+        lum = t[..., :3].max(2, keepdims=True)
+        tint = np.array([0.35, 0.62, 1.0]) * lum * 1.9 * k
+        scr = 1 - (1 - b[..., :3]) * (1 - np.clip(tint, 0, 1))
+        b[..., :3] = b[..., :3] * (1 - a) + scr * a
+        base = Image.fromarray((np.clip(b, 0, 1) * 255).astype(np.uint8), "RGBA")
     # soft dark patch top-right, only behind a tournament logo (keeps it readable on any photo)
     if data.get("logo"):
         patch = Image.new("RGBA", (W, H), (0, 0, 0, 0))

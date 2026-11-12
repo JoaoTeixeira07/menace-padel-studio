@@ -373,8 +373,8 @@ HEADER_SS = 3   # header text is drawn at 3x and downscaled: clean letter spacin
 BADGE = dict(gap=6, dy=29, d=27)
 XCOM = dict(x=831, dy=37, w=115)
 DIVIDER = dict(x0=101, x1=978, dy=111, h=2, color=(229, 229, 229))
-BODY = dict(x=133, dy=178, size=36, lead=60, max_w=805, regular="Regular", bold="SemiBold", color=(15, 15, 15))
-BOTTOM_PAD = 57                # last baseline -> card bottom
+BODY = dict(x=133, dy=164, size=36, lead=50, max_w=805, regular="Regular", bold="SemiBold", color=(15, 15, 15))
+BOTTOM_PAD = 44                # last baseline -> card bottom (tightened: compact card for long tweets)
 # black gradient behind the card (TWEET.psd "Gradient Fill 5"), alpha every 10 px from y=0
 TW_FADE = [0] * 65 + [1, 4, 7, 10, 13, 17, 22, 27, 32, 38, 45, 51, 58, 66, 73, 80, 89, 97, 106, 116, 126, 137,
                       147, 158, 170, 181, 192, 204, 215, 225, 235, 245, 253] + [255] * 38
@@ -628,6 +628,23 @@ def tw_fade():
     return layer
 
 
+def padel_bottom():
+    """Padel background layers: the same soft top-left shade + bottom layers as the tennis tweet
+    (dark fade, brush texture and court-line details), recoloured to electric blue."""
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    # 'Gradient Fill 2': black, 100% -> 0%, angle -29 deg, only the top-left corner gets darker
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    t = np.clip(1 - (yy * 0.87 + xx * 0.49) / 760, 0, 1) * 40
+    sh = Image.new("RGBA", (W, H), (0, 0, 0, 255)); sh.putalpha(Image.fromarray(t.astype(np.uint8), "L"))
+    layer.alpha_composite(sh)
+    ov = Image.open(asset("tweet_overlay_padel.png")).convert("RGBA")
+    if ov.size != (W, H):
+        ov = ov.resize((W, H), Image.LANCZOS)
+    layer.alpha_composite(ov)
+    return layer
+
+
+
 def render(data, out_path, photo=None):
     photo = photo or data.get("photo")
     if not photo:
@@ -644,7 +661,7 @@ def render(data, out_path, photo=None):
         canvas.alpha_composite(cut)
         if xl is not None:
             canvas.alpha_composite(xl)
-    canvas.alpha_composite(tw_fade())
+    canvas.alpha_composite(padel_bottom())   # electric-blue texture + dark fade (tennis layers, recoloured)
     canvas.alpha_composite(card)
     canvas.alpha_composite(logo_img(), LOGO_TOP_LEFT)
     canvas.convert("RGB").save(out_path, quality=95)

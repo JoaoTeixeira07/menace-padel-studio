@@ -7,7 +7,9 @@ Usage:
 data.json:
 {
   "name": "Jose", "handle": "@JoseP0933", "verified": true,
-  "avatar": "/mnt/user-data/uploads/avatar.jpg",          # the account's real profile photo
+  "avatar": "/mnt/user-data/uploads/avatar.jpg",          # the account's real profile photo (full-size, sharpest)
+  "screenshot": "/mnt/user-data/uploads/tweet.png",      # or: crop the avatar from the tweet screenshot
+  "avatar_crop": [x0, y0, x1, y1],                        #   box of the avatar circle in the screenshot (pixels)
   "text": "Everyone is praising the Spanish coach but **his decision was terrible.** If they lose ...",
   "circle": {...},                                         # optional, same as 1word/multiline
   "bg_focus_y": 0.35, "bg_focus_x": 0.5, "bg_zoom": 1.0, "bw": false
@@ -365,8 +367,9 @@ CARD_BOTTOM = 1240             # fixed bottom edge; the card grows upwards
 CARD_FILL = (250, 250, 250)
 INNER_SHADOW = dict(opacity=0.25, size=35)
 AVATAR = dict(x=129, dy=23, d=72, ring=3)          # dy = offset from the card top
-NAME = dict(x=215, dy=53, size=30, weight="Bold", color=(15, 20, 25), opsz=32)
-HANDLE = dict(x=215, dy=86, size=24, weight="Regular", color=(83, 100, 113), opsz=24)
+NAME = dict(x=215, dy=53, size=30, weight="Bold", color=(15, 20, 25), opsz=24)
+HANDLE = dict(x=215, dy=86, size=24, weight="Regular", color=(83, 100, 113), opsz=14, track=0.01)
+HEADER_SS = 3   # header text is drawn at 3x and downscaled: clean letter spacing, no touching glyphs
 BADGE = dict(gap=6, dy=29, d=27)
 XCOM = dict(x=831, dy=37, w=115)
 DIVIDER = dict(x0=101, x1=978, dy=111, h=2, color=(229, 229, 229))
@@ -533,6 +536,20 @@ def rounded_mask(w, h, r, ss=4):
     return m.resize((w, h), Image.LANCZOS)
 
 
+def avatar_from_screenshot(data):
+    """Crop the avatar circle from the tweet screenshot (tight box), upscale to 240x240 (LANCZOS)."""
+    if not (data.get("screenshot") and data.get("avatar_crop")):
+        return None
+    x0, y0, x1, y1 = [int(v) for v in data["avatar_crop"]]
+    im = ImageOps.exif_transpose(Image.open(data["screenshot"])).convert("RGB").crop((x0, y0, x1, y1))
+    s = min(im.size)
+    im = im.crop(((im.width - s) // 2, (im.height - s) // 2, (im.width - s) // 2 + s, (im.height - s) // 2 + s))
+    out = os.path.join(HERE, "_avatar_from_screenshot.png")
+    im.resize((240, 240), Image.LANCZOS).save(out)
+    return out
+
+
+
 def avatar_img(path, d, ring):
     im = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
     s = min(im.width, im.height)
@@ -570,19 +587,29 @@ def card_layer(data):
     layer.alpha_composite(card, (CARD_X0, top))
     d = ImageDraw.Draw(layer)
     # header
-    if data.get("avatar"):
-        layer.alpha_composite(avatar_img(data["avatar"], AVATAR["d"], AVATAR["ring"]), (AVATAR["x"], top + AVATAR["dy"]))
-    fn = inter(NAME["weight"], NAME["size"], NAME.get("opsz"))
-    name_runs = [(k, s, False) for k, s in tokens(data.get("name", ""))]
-    x_end = draw_runs(layer, (NAME["x"], top + NAME["dy"]), name_runs, fn, fn, NAME["size"], NAME["color"])
-    if data.get("verified"):
-        b = Image.open(asset("tweet_verified.png")).convert("RGBA").resize((BADGE["d"], BADGE["d"]), Image.LANCZOS)
-        layer.alpha_composite(b, (round(x_end + BADGE["gap"]), top + BADGE["dy"]))
-    fh = inter(HANDLE["weight"], HANDLE["size"], HANDLE.get("opsz"))
+    av = data.get("avatar") or avatar_from_screenshot(data)
+    if av:
+        layer.alpha_composite(avatar_img(av, AVATAR["d"], AVATAR["ring"]), (AVATAR["x"], top + AVATAR["dy"]))
+    # name + handle drawn on a 3x supersampled tile, then downscaled (crisp, open spacing)
+    ss = HEADER_SS
+    tile = Image.new("RGBA", ((XCOM["x"] - NAME["x"]) * ss, 110 * ss), (0, 0, 0, 0))
+    fn = inter(NAME["weight"], NAME["size"] * ss, NAME.get("opsz"))
+    name_runs = [(k, s_, False) for k, s_ in tokens(data.get("name", ""))]
+    x_end = draw_runs(tile, (0, NAME["dy"] * ss), name_runs, fn, fn, NAME["size"] * ss, NAME["color"]) / ss + NAME["x"]
+    fh = inter(HANDLE["weight"], HANDLE["size"] * ss, HANDLE.get("opsz"))
     handle = data.get("handle", "")
     if handle and not handle.startswith("@"):
         handle = "@" + handle
-    d.text((HANDLE["x"], top + HANDLE["dy"]), handle, font=fh, fill=HANDLE["color"], anchor="ls")
+    td = ImageDraw.Draw(tile)
+    hx = 0.0
+    for ch in handle:
+        td.text((hx, HANDLE["dy"] * ss), ch, font=fh, fill=HANDLE["color"], anchor="ls")
+        hx += fh.getlength(ch) + HANDLE.get("track", 0) * fh.size
+    tile = tile.resize((tile.width // ss, tile.height // ss), Image.LANCZOS)
+    layer.alpha_composite(tile, (NAME["x"], top))
+    if data.get("verified"):
+        b = Image.open(asset("tweet_verified.png")).convert("RGBA").resize((BADGE["d"], BADGE["d"]), Image.LANCZOS)
+        layer.alpha_composite(b, (round(x_end + BADGE["gap"]), top + BADGE["dy"]))
     xl = Image.open(asset("tweet_xcom.png")).convert("RGBA")
     xl = xl.resize((XCOM["w"], round(xl.height * XCOM["w"] / xl.width)), Image.LANCZOS)
     layer.alpha_composite(xl, (XCOM["x"], top + XCOM["dy"]))

@@ -25,6 +25,8 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+EDIT = None        # studio_editor.Scene while the editor page is being built (see studio_editor.py)
+_FRAMING = {}      # exact photo framing of the last render (zoom, fx, fy), for the editor
 W, H = 1080, 1350
 
 # --- design constants ---
@@ -215,6 +217,7 @@ def place_photo(photo, data, need_cutout, autoframe=None):
         else:
             cut = bg.convert("RGBA")
             cut.putalpha(person_mask(bg))  # recomputed on the final crop for crisp edges
+    _FRAMING.update(zoom=zoom, fx=fx, fy=fy)
     return bg.convert("RGBA"), cut, {"zoom": round(zoom, 2), "focus_x": round(fx, 2), "focus_y": round(fy, 2)}
 
 
@@ -408,6 +411,9 @@ def circle_layers(spec, bw, person_alpha=None, avoid=None):
         xl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         _put(xl, sh, (cx - xs // 2 - 20, cy - d // 2 - int(xs * 0.55) - 20))
         _put(xl, xi, (cx - xs // 2, cy - d // 2 - int(xs * 0.55)))
+    if EDIT is not None:   # editor page: the circle is drawn there (movable), not here
+        EDIT.circle(spec["photo"], d, cx, cy, zoom, fx, fy, CIRCLE_STROKE, bw, bool(spec.get("x")),
+                    bool(spec.get("pop")), person_mask)
     return layer, xl, pos
 
 
@@ -474,35 +480,52 @@ def render(data, out_path, photo=None):
     bg, cut, framing = place_photo(photo, data, need_cutout=(layout == "top" or bool(circ)),
                                    autoframe=(layout == "top"))
     canvas = bg
+    if EDIT is not None:
+        canvas = EDIT.photo(photo, _FRAMING["zoom"], _FRAMING["fx"], _FRAMING["fy"], bool(data.get("bw")))
     sl, lines, sub_top = subtitle_layer(sub) if sub else (None, [], None)
     wl, capbox = word_layer(word, layout, bool(sub), sub_top)
     cl = xl = cpos = None
     if circ:
+        if EDIT is not None:
+            EDIT.defer_circle = True
         cl, xl, cpos = circle_layers(circ, data.get("bw"), cut.getchannel("A") if cut else None)
-    if layout == "top":
-        # photo -> gradient -> word -> circle -> player (front)
-        canvas.alpha_composite(fade_layer("top"))
-        canvas.alpha_composite(wl)
-        if cl is not None:
+
+    def front(with_circle):
+        # editor page: circle and player cutout are movable layers; here: composite them
+        nonlocal canvas
+        if EDIT is not None:
+            canvas = EDIT.split(canvas)
+            if with_circle:
+                EDIT.flush_circle()
+            EDIT.cutout(person_mask, cut.getchannel("A"))
+            if xl is not None:
+                EDIT.xmark()
+            return
+        if with_circle:
             canvas.alpha_composite(cl)
         canvas.alpha_composite(cut)
         if xl is not None:
             canvas.alpha_composite(xl)
+
+    if layout == "top":
+        # photo -> gradient -> word -> circle -> player (front)
+        canvas.alpha_composite(fade_layer("top"))
+        canvas.alpha_composite(wl)
+        front(cl is not None)
         if sub:
             canvas.alpha_composite(bottom_shade())  # over the player too: keeps the subtitle readable
     else:
         # photo -> circle -> player -> gradient -> word
         if cl is not None:
-            canvas.alpha_composite(cl)
-            canvas.alpha_composite(cut)
-            if xl is not None:
-                canvas.alpha_composite(xl)
+            front(True)
         canvas.alpha_composite(fade_layer("bottom"))
         canvas.alpha_composite(wl)
     if sl is not None:
         canvas.alpha_composite(sl)
     lg = logo_img()
     canvas.alpha_composite(lg, LOGO_BOTTOM_RIGHT if layout == "top" else LOGO_TOP_LEFT)
+    if EDIT is not None:
+        EDIT.static(canvas)
     canvas.convert("RGB").save(out_path, quality=95)
     return {"word": word, "position": layout, "cap_box": capbox, "subtitle_lines": lines, "bw": bool(data.get("bw")), "framing": framing, "circle": cpos}
 
@@ -515,7 +538,14 @@ def bottom_shade():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    args = [a for a in sys.argv[1:] if a != "--editor"]
+    if len(args) < 2:
         print(__doc__); sys.exit(1)
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-    print(json.dumps(render(data, sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None), ensure_ascii=False))
+    data = json.load(open(args[0], encoding="utf-8"))
+    photo = args[2] if len(args) > 2 else None
+    info = render(data, args[1], photo)
+    if "--editor" in sys.argv or data.get("editor"):
+        # interactive page to drag / zoom the photos: <out>_editor.html (see studio_editor.py)
+        import studio_editor
+        info["editor"] = studio_editor.run(sys.modules[__name__], data, args[1], photo, accent="#2E7BFF")
+    print(json.dumps(info, ensure_ascii=False))

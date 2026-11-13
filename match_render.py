@@ -25,6 +25,8 @@ import numpy as np
 
 W, H = 1080, 1350
 HERE = os.path.dirname(os.path.abspath(__file__))
+EDIT = None        # studio_editor.Scene while the editor page is being built (see studio_editor.py)
+_FRAMING = {}      # exact photo framing of the last render (zoom, fx, fy), for the editor
 NAME_CX = (240, 838)          # centre of the left / right pair names
 NAME_TOP = 888                # cap top of the first name line
 NAME_SIZE, NAME_PITCH = 64, 56
@@ -297,6 +299,8 @@ def render(data, out_path, photo=None):
     fx, fy = data.get("bg_focus_x", 0.5), data.get("bg_focus_y", 0.35)
     x0, y0 = round((bg.width - W) * fx), round((bg.height - H) * fy)
     base = bg.crop((x0, y0, x0 + W, y0 + H)).convert("RGBA")
+    if EDIT is not None:
+        base = EDIT.photo(photo, data.get("bg_zoom", 1.0), fx, fy, bool(data.get("bw")))
 
     # fades: soft dark at the top (logos), strong at the bottom (text)
     col = np.zeros(H, np.float32)
@@ -346,12 +350,21 @@ def render(data, out_path, photo=None):
         ImageDraw.Draw(base).text((x + fw + 12, TIME_BASE), t, font=f_h, fill=(255, 255, 255), anchor="ls")
         x += w + gap
 
+    if EDIT is not None:
+        EDIT.static(base)
     base.convert("RGB").save(out_path, quality=95)
     return {"title": title, "tournament": tour, "times": times, "name_style": data.get("name_style", "editorial")}
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    args = [a for a in sys.argv[1:] if a != "--editor"]
+    if len(args) < 2:
         print(__doc__); sys.exit(1)
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-    print(json.dumps(render(data, sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None), ensure_ascii=False))
+    data = json.load(open(args[0], encoding="utf-8"))
+    photo = args[2] if len(args) > 2 else None
+    info = render(data, args[1], photo)
+    if "--editor" in sys.argv or data.get("editor"):
+        # interactive page to drag / zoom the photos: <out>_editor.html (see studio_editor.py)
+        import studio_editor
+        info["editor"] = studio_editor.run(sys.modules[__name__], data, args[1], photo, accent="#2E7BFF")
+    print(json.dumps(info, ensure_ascii=False))

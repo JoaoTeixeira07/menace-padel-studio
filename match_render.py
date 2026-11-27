@@ -124,12 +124,12 @@ def glow_text(base, xy, text, f, anchor, glow=0.55, blur=16, tracking=0.0):
     d = ImageDraw.Draw(m)
     if tracking:
         x, y = xy
-        total = sum(f.getlength(c) for c in text) + tracking * f.size * (len(text) - 1)
+        total = f.getlength(text) + tracking * f.size * (len(text) - 1)
         if anchor[0] == "m":
             x -= total / 2
-        for c in text:
-            d.text((x, y), c, font=f, fill=255, anchor="l" + anchor[1])
-            x += f.getlength(c) + tracking * f.size
+        for k, c in enumerate(text):   # kerning kept: position from the run up to and including c
+            d.text((x + f.getlength(text[:k + 1]) - f.getlength(c) + tracking * f.size * k, y), c, font=f, fill=255,
+                   anchor="l" + anchor[1])
     else:
         d.text(xy, text, font=f, fill=255, anchor=anchor)
     if glow:

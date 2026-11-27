@@ -607,10 +607,9 @@ def card_layer(data):
     if handle and not handle.startswith("@"):
         handle = "@" + handle
     td = ImageDraw.Draw(tile)
-    hx = 0.0
-    for ch in handle:
+    for k, ch in enumerate(handle):   # kerning kept
+        hx = fh.getlength(handle[:k + 1]) - fh.getlength(ch) + HANDLE.get("track", 0) * fh.size * k
         td.text((hx, HANDLE["dy"] * ss), ch, font=fh, fill=HANDLE["color"], anchor="ls")
-        hx += fh.getlength(ch) + HANDLE.get("track", 0) * fh.size
     tile = tile.resize((tile.width // ss, tile.height // ss), Image.LANCZOS)
     layer.alpha_composite(tile, (NAME["x"], top))
     if data.get("verified"):

@@ -318,7 +318,7 @@ def lines_layer(lines, layout, has_marks, sub_cap_top):
         mw, mlime = m.copy(), m.copy()
         dw, dl = ImageDraw.Draw(mw), ImageDraw.Draw(mlime)
         for j, ch in enumerate(text):
-            x = pad - l + f.getlength(text[:j])
+            x = pad - l + f.getlength(text[:j + 1]) - f.getlength(ch)   # kerning: keep the pair before ch
             (dl if flags[j] else dw).text((x, base), ch, font=f, fill=255, anchor="ls")
         mw = mw.resize((round(mw.width * W_STRETCH), mw.height), Image.LANCZOS)
         mlime = mlime.resize((round(mlime.width * W_STRETCH), mlime.height), Image.LANCZOS)
@@ -535,7 +535,7 @@ def subtitle_layer(text):
     for i, s in enumerate(lines):
         x = W / 2 - line_w(f, s) / 2
         for j, ch in enumerate(s):
-            d.text((x + f.getlength(s[:j]) + tr * j, first + i * S_LEAD), ch, font=f, fill=255, anchor="ls")
+            d.text((x + f.getlength(s[:j + 1]) - f.getlength(ch) + tr * j, first + i * S_LEAD), ch, font=f, fill=255, anchor="ls")
     cap = -f.getbbox("H", anchor="ls")[1]
     y0, y1 = first - cap, last
     grad = Image.new("RGB", (1, H))

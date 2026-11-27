@@ -234,7 +234,7 @@ def render_quote_line(line, font, lime_default):
     dw, dl = ImageDraw.Draw(m_white), ImageDraw.Draw(m_lime)
     track = Q_TRACK * font.size
     for i, ch in enumerate(text):
-        x = pad + font.getlength(text[:i]) + track * i
+        x = pad + font.getlength(text[:i + 1]) - font.getlength(ch) + track * i   # kerning: keep the pair before ch
         (dl if flags[i] else dw).text((x, base_y), ch, font=font, fill=255, anchor="ls")
     # faux italic: shear around baseline
     def shear(im):
@@ -275,7 +275,7 @@ def draw_tracked(draw, xy, text, font, track, fill):
     x, y = xy
     t = track * font.size
     for i, ch in enumerate(text):
-        draw.text((x + font.getlength(text[:i]) + t * i, y), ch, font=font, fill=fill, anchor="ls")
+        draw.text((x + font.getlength(text[:i + 1]) - font.getlength(ch) + t * i, y), ch, font=font, fill=fill, anchor="ls")
 
 
 def fit_photo(path, fx, fy, zoom):

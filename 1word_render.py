@@ -448,7 +448,7 @@ def subtitle_layer(text):
     for i, s in enumerate(lines):
         x = W / 2 - line_w(f, s) / 2
         for j, ch in enumerate(s):
-            d.text((x + f.getlength(s[:j]) + tr * j, first + i * S_LEAD), ch, font=f, fill=255, anchor="ls")
+            d.text((x + f.getlength(s[:j + 1]) - f.getlength(ch) + tr * j, first + i * S_LEAD), ch, font=f, fill=255, anchor="ls")
     cap = -f.getbbox("H", anchor="ls")[1]
     y0, y1 = first - cap, last
     grad = Image.new("RGB", (1, H))
